@@ -852,6 +852,34 @@ res_lsw(unsigned vt, unsigned element, signed offset, unsigned base)
  * Group II vector loads and stores:
  * PV and UV (As of RCP implementation, XV and ZV are reserved opcodes.)
  */
+
+/*
+ * General-case LPV and SUV, for the element and alignment combinations that
+ * the unrolled cases below don't cover.  F3DEX3 uses nonzero elements.
+ */
+static void LPV_any(unsigned vt, unsigned e, signed offset, unsigned base)
+{
+    const u32 addr = (SR[base] + 8*offset) & 0x00000FFF;
+    const u32 line = addr & ~07;
+    register unsigned int i;
+
+    for (i = 0; i < 8; i++)
+        VR[vt][i] = DMEM[BES((line + (((addr & 07) - e + i) & 0xF)) & 0xFFF)] << 8;
+}
+static void SUV_any(unsigned vt, unsigned e, signed offset, unsigned base)
+{
+    const u32 addr = (SR[base] + 8*offset) & 0x00000FFF;
+    register unsigned int i;
+
+    for (i = 0; i < 8; i++) {
+        const unsigned int o = e + i;
+
+        DMEM[BES((addr + i) & 0xFFF)] = ((o & 0xF) < 8)
+          ? (u8)(VR[vt][o & 07] >> 7)
+          : (u8)((u16)VR[vt][o & 07] >> 8);
+    }
+}
+
 void LPV(unsigned vt, unsigned element, signed offset, unsigned base)
 {
     register u32 addr;
@@ -859,7 +887,7 @@ void LPV(unsigned vt, unsigned element, signed offset, unsigned base)
     const unsigned int e = element;
 
     if (e != 0x0) {
-        message("LPV\nIllegal element.");
+        LPV_any(vt, e, offset, base);
         return;
     }
     addr = (SR[base] + 8*offset) & 0x00000FFF;
@@ -1197,7 +1225,7 @@ void SUV(unsigned vt, unsigned element, signed offset, unsigned base)
     const unsigned int e = element;
 
     if (e != 0x0) {
-        message("SUV\nIllegal element.");
+        SUV_any(vt, e, offset, base);
         return;
     }
     addr = (SR[base] + 8*offset) & 0x00000FFF;
@@ -1227,7 +1255,7 @@ void SUV(unsigned vt, unsigned element, signed offset, unsigned base)
         DMEM[addr + BES(0x003)] = (u8)(VR[vt][07] >> 7);
         break;
     default: /* Completely legal, just never seen it be done. */
-        message("SUV\nWeird addr.");
+        SUV_any(vt, e, offset, base);
     }
     return;
 }
@@ -1618,8 +1646,16 @@ void LTV(unsigned vt, unsigned element, signed offset, unsigned base)
     return;
 }
 void SWV(unsigned vt, unsigned element, signed offset, unsigned base)
-{ /* Dummy implementation only:  Do any games execute this? */
-    res_lsw(vt, element, offset, base);
+{ /* F3DEX3 uses this to transpose the model matrix for directional lights. */
+    register u32 addr;
+    register unsigned int b, i;
+    const unsigned int e = element;
+
+    addr = (SR[base] + 16*offset) & 0x00000FFF;
+    b = addr & 0x00000007;
+    addr &= ~0x00000007;
+    for (i = 0; i < 16; i++)
+        DMEM[BES((addr + ((b + i) & 0xF)) & 0xFFF)] = VR_B(vt, (e + i) & 0xF);
     return;
 }
 void STV(unsigned vt, unsigned element, signed offset, unsigned base)
